@@ -1,0 +1,14 @@
+[package]
+name = "asbs"
+version = "1.0.0"
+authors = ["Artemy Astakhov <contact@aeverless.dev>"]
+categories = ["cryptography", "encoding", "parsing"]
+description = "A generic steganography library"
+documentation = "https://docs.rs/asbs"
+edition = "2021"
+keywords = ["steganography", "security", "privacy"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/aeverless/asbs"
+
+[dependencies]
