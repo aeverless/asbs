@@ -79,6 +79,8 @@ where
     M: FnMut(usize) -> Option<u8>,
     W: Write,
 {
+    type Err = io::Error;
+
     fn conceal<P: Read, C: Read>(self, payload: P, cover: C) -> io::Result<usize> {
         let mut payload_bytes = BufReader::new(payload).bytes();
 

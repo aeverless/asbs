@@ -102,6 +102,8 @@ where
     M: FnMut(usize) -> Option<u8>,
     R: Read,
 {
+    type Err = io::Error;
+
     fn reveal<W: Write>(self, output: W) -> io::Result<usize> {
         let mut output = BufWriter::new(output);
 

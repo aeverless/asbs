@@ -22,6 +22,9 @@ pub mod binary;
 ///
 /// [`binary::Carrier`] can be used to conceal secret messages in binary data.
 pub trait Conceal {
+    /// The associated error type of the [`conceal`][Conceal::conceal] method.
+    type Err;
+
     /// Conceals the payload in the given cover and returns how many bytes were written in total.
     ///
     /// This function does not provide any guarantees about written data if `payload` cannot fit
@@ -32,7 +35,7 @@ pub trait Conceal {
     ///
     /// This function returns any form of error encountered to the caller. If an error
     /// is returned, however, it is not guaranteed that no bytes were written.
-    fn conceal<P: io::Read, C: io::Read>(self, payload: P, cover: C) -> io::Result<usize>;
+    fn conceal<P: io::Read, C: io::Read>(self, payload: P, cover: C) -> Result<usize, Self::Err>;
 }
 
 /// A trait for objects able to reveal steganographic messages, or packages.
@@ -44,6 +47,9 @@ pub trait Conceal {
 ///
 /// [`binary::Package`] can be used to reveal secret messages hidden in binary data.
 pub trait Reveal {
+    /// The associated error type of the [`reveal`][Reveal::reveal] method.
+    type Err;
+
     /// Writes the hidden message into `output`, returning how many bytes were written.
     ///
     /// It is up to the implementations to establish a format and conditions under which
@@ -57,5 +63,5 @@ pub trait Reveal {
     ///
     /// This function returns any form of error encountered to the caller. If an error
     /// is returned, however, it is not guaranteed that no bytes were written.
-    fn reveal<W: io::Write>(self, output: W) -> io::Result<usize>;
+    fn reveal<W: io::Write>(self, output: W) -> Result<usize, Self::Err>;
 }
