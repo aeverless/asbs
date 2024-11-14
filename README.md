@@ -68,7 +68,7 @@ package.reveal(&mut message)?;
 
 ## License
 
-The library is licensed under either the MIT License or Apache-2.0 License, at your option.
+The library is licensed under either the [MIT License](LICENSE-MIT) or the [Apache-2.0 License](LICENSE-APACHE), at your option.
 
 ## Authors
 
