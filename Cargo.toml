@@ -1,6 +1,6 @@
 [package]
 name = "asbs"
-version = "1.1.0"
+version = "1.2.0"
 authors = ["Artemy Astakhov <contact@aeverless.dev>"]
 categories = ["cryptography", "encoding", "parsing"]
 description = "A generic steganography library"

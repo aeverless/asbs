@@ -30,53 +30,50 @@
 //!
 //! ## Examples
 //!
-//! Hiding a message within a binary file:
+//! Concealing a secret message with embedded length:
 //!
 //! ```no_run
 //! use asbs::{binary, Conceal};
 //! use std::fs::File;
 //!
-//! // Define a bit pattern
+//! // Define the bit pattern
 //! let pattern = |i| Some(1u8 << (i % 3));
 //!
-//! // Open the cover file, which will hide our payload
-//! let cover = File::open("cover")?;
+//! // Define the payload
 //! let payload = b"a very secret message";
 //!
-//! // Initialize a package buffer
-//! let mut package = Vec::new();
+//! // Create a carrier with the given payload length, pattern, and output file
+//! let mut carrier = binary::Carrier::with_embedded_len(
+//!     payload.len(),
+//!     pattern,
+//!     File::create("package")?,
+//! );
 //!
-//! // Create a carrier with a given pattern that will write to `package`
-//! let mut carrier = binary::Carrier::new(pattern, &mut package);
-//!
-//! // Write the payload hidden within the given cover into `package`
-//! carrier.conceal(payload.as_slice(), cover)?;
+//! // Write the payload hidden within the given cover file
+//! carrier.conceal(
+//!     payload.as_slice(),
+//!     File::open("cover")?,
+//! )?;
 //! # Ok::<(), std::io::Error>(())
 //! ```
 //!
-//! Extracting a hidden message from a binary file:
+//! Extracting a hidden message with embedded length:
 //!
 //! ```no_run
 //! use asbs::{binary, Reveal};
 //! use std::fs::File;
 //!
-//! // Define a uniform bit pattern
-//! let pattern = |_| Some(0b_0010_00011);
+//! // Define the bit pattern
+//! let pattern = |_| Some(0b1010);
 //!
-//! // Open the package file, which contains the sought message
-//! let package = File::open("package")?;
+//! // Create a package with the given pattern and input file
+//! let mut package = binary::Package::with_embedded_len(
+//!     pattern,
+//!     File::open("package")?,
+//! );
 //!
-//! // Define message length
-//! let message_len = 21;
-//!
-//! // Initialize a message buffer
-//! let mut message = Vec::with_capacity(message_len);
-//!
-//! // Create a package with the given message length, pattern, and package file
-//! let mut package = binary::Package::with_len(message_len, pattern, package);
-//!
-//! // Write the extracted message into `message`
-//! package.reveal(&mut message)?;
+//! // Write the extracted message into a file
+//! package.reveal(File::create("message")?)?;
 //! # Ok::<(), std::io::Error>(())
 //! ```
 

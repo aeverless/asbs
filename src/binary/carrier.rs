@@ -13,7 +13,8 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 /// 3. The cover is empty, in which case the message remains partially written; it may
 ///    be possible if the cover is unable to contain the message in its concealed form.
 ///    In this case it is recommended to either use a bigger cover or pick a different
-///    bit pattern.
+///    bit pattern, or
+/// 4. The specified length of the payload is reached.
 ///
 /// # Examples
 ///
@@ -23,15 +24,36 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 /// use asbs::{binary, Conceal};
 /// use std::fs::File;
 ///
-/// let pattern = |i| Some(1u8 << (i % 3));
+/// let mut carrier = binary::Carrier::new(
+///     |i| Some(1u8 << (i % 3)),
+///     File::create("package")?,
+/// );
 ///
-/// let cover = File::open("cover")?;
+/// carrier.conceal(
+///     b"a very secret message".as_slice(),
+///     File::open("cover")?,
+/// )?;
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
+/// Concealing a secret message in the supplied cover with its length embedded:
+///
+/// ```no_run
+/// use asbs::{binary, Conceal};
+/// use std::fs::File;
+///
 /// let payload = b"a very secret message";
 ///
-/// let mut package = Vec::new();
+/// let mut carrier = binary::Carrier::with_embedded_len(
+///     payload.len(),
+///     |i| Some(1u8 << (i % 3)),
+///     File::create("package")?,
+/// );
 ///
-/// let mut carrier = binary::Carrier::new(pattern, &mut package);
-/// carrier.conceal(payload.as_slice(), cover)?;
+/// carrier.conceal(
+///     payload.as_slice(),
+///     File::open("cover")?,
+/// )?;
 /// # Ok::<(), std::io::Error>(())
 /// ```
 #[derive(Debug)]
@@ -42,6 +64,7 @@ where
 {
     pattern: P,
     writer: BufWriter<W>,
+    len: Option<u64>,
 }
 
 impl<P, W> Carrier<P, W>
@@ -49,9 +72,10 @@ where
     P: FnMut(usize) -> Option<u8>,
     W: Write,
 {
-    /// Creates a new [`Carrier<P, W>`] with the supplied pattern and writer.
+    /// Creates a new [`Carrier<P, W>`] with the supplied length, pattern, and writer.
     ///
-    /// This imposes no limits upon the number of bytes written.
+    /// This embeds a length into the payload and stops writing when the length is reached.
+    /// The length is encoded as a 64-bit integer in big-endian byte order.
     ///
     /// # Examples
     ///
@@ -59,10 +83,37 @@ where
     /// use asbs::binary;
     /// use std::fs::File;
     ///
-    /// let pattern = |i| Some(if i % 2 == 0 { 1u8 << ((i % 2) + 1) } else { 0b_0001_0010 });
-    /// let package = File::create_new("package")?;
+    /// let mut carrier = binary::Carrier::with_embedded_len(
+    ///     2048,
+    ///     |_| Some(0b11),
+    ///     File::create("package")?,
+    /// );
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    pub fn with_embedded_len(len: usize, pattern: P, writer: W) -> Self {
+        Self {
+            pattern,
+            writer: BufWriter::new(writer),
+            len: Some(len as u64),
+        }
+    }
+
+    /// Creates a new [`Carrier<P, W>`] with the supplied pattern and writer.
     ///
-    /// let mut carrier = binary::Carrier::new(pattern, package);
+    /// This imposes no limits upon the number of bytes written and does not embed
+    /// message length into the payload. See [`Carrier::with_embedded_len`] for such
+    /// functionality.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use asbs::binary;
+    /// use std::fs::File;
+    ///
+    /// let mut carrier = binary::Carrier::new(
+    ///     |_| Some(0b101),
+    ///     File::create("package")?,
+    /// );
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[must_use]
@@ -70,6 +121,7 @@ where
         Self {
             pattern,
             writer: BufWriter::new(writer),
+            len: None,
         }
     }
 }
@@ -82,16 +134,22 @@ where
     type Err = io::Error;
 
     fn conceal<P: Read, C: Read>(self, payload: P, cover: C) -> io::Result<usize> {
-        let mut payload_bytes = BufReader::new(payload).bytes();
-
-        let mut payload_byte = match payload_bytes.next() {
-            Some(byte) => byte?,
-            None => return Ok(0),
-        };
+        let len_bytes = self
+            .len
+            .map(|len| len.to_be_bytes().to_vec())
+            .unwrap_or_default();
 
         let mut cover = BufReader::new(cover);
 
-        let mut bytes_written = 0usize;
+        let mut payload_bytes = len_bytes.chain(BufReader::new(payload)).bytes();
+        let mut payload_byte = match payload_bytes.next() {
+            Some(byte) if self.len.is_none_or(|len| len > 0) => byte?,
+            _ => return Ok(io::copy(&mut cover, &mut self.writer)? as usize),
+        };
+
+        let mut payload_bytes_written = 0u64;
+
+        let mut bytes_written = 0;
         let mut bit_count = 0usize;
 
         for (index, cover_byte) in cover.by_ref().bytes().enumerate() {
@@ -109,10 +167,18 @@ where
                     continue;
                 }
 
+                payload_bytes_written += 1;
+
                 payload_byte = match payload_bytes.next() {
                     Some(byte) => byte?,
                     None => break,
                 };
+
+                if self.len.is_some_and(|len| {
+                    payload_bytes_written > 8 && payload_bytes_written - 8 >= len
+                }) {
+                    break;
+                }
 
                 bit_count = 0;
             }
@@ -125,6 +191,7 @@ where
         }
 
         bytes_written += io::copy(&mut cover, &mut self.writer)? as usize;
+
         self.writer.flush()?;
 
         Ok(bytes_written)

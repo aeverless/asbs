@@ -4,6 +4,13 @@ use std::{
     ops::ControlFlow,
 };
 
+#[derive(Debug, PartialEq)]
+enum PayloadLength {
+    Bound(u64),
+    Unbound,
+    Embedded,
+}
+
 /// A binary package that contains a steganographic message.
 ///
 /// It writes to the package writer in the [`reveal`][crate::Reveal::reveal] method until
@@ -21,14 +28,28 @@ use std::{
 /// use asbs::{binary, Reveal};
 /// use std::fs::File;
 ///
-/// let pattern = |_| Some(0b_0010_00011);
-/// let package = File::open("package")?;
+/// let mut package = binary::Package::with_len(
+///     64,
+///     |_| Some(0b_0010_00011),
+///     File::open("package")?,
+/// );
 ///
-/// let message_len = 21;
-/// let mut message = Vec::with_capacity(message_len);
+/// package.reveal(File::open("message")?)?;
+/// # Ok::<(), std::io::Error>(())
+/// ```
 ///
-/// let mut package = binary::Package::with_len(message_len, pattern, package);
-/// package.reveal(&mut message)?;
+/// Revealing a secret message hidden within the package with embedded length:
+///
+/// ```no_run
+/// use asbs::{binary, Reveal};
+/// use std::fs::File;
+///
+/// let mut package = binary::Package::with_embedded_len(
+///     |_| Some(0b1010),
+///     File::open("package")?,
+/// );
+///
+/// package.reveal(File::open("message")?)?;
 /// # Ok::<(), std::io::Error>(())
 /// ```
 #[derive(Debug)]
@@ -39,7 +60,7 @@ where
 {
     pattern: P,
     reader: BufReader<R>,
-    len: usize,
+    len: PayloadLength,
 }
 
 impl<P, R> Package<P, R>
@@ -49,8 +70,7 @@ where
 {
     /// Creates a new [`Package<P, R>`] with the supplied message length, pattern, and reader.
     ///
-    /// This function may be useful when you know expected message length and the bit
-    /// pattern does not include an upper limit on the index.
+    /// This function is useful when you know the expected message length.
     ///
     /// # Examples
     ///
@@ -58,11 +78,11 @@ where
     /// use asbs::binary;
     /// use std::fs::File;
     ///
-    /// let pattern = |i| Some(1u8 << (i % 3) + (i % 2));
-    /// let package = File::open("package")?;
-    /// let message_length = 32;
-    ///
-    /// let mut package = binary::Package::with_len(message_length, pattern, package);
+    /// let mut package = binary::Package::with_len(
+    ///     32,
+    ///     |i| Some(1u8 << (i % 3)),
+    ///     File::open("package")?,
+    /// );
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[must_use]
@@ -70,14 +90,14 @@ where
         Self {
             pattern,
             reader: BufReader::new(reader),
-            len,
+            len: PayloadLength::Bound(len as u64),
         }
     }
 
     /// Creates a new [`Package<P, R>`] with the supplied pattern and reader.
     ///
-    /// This does not impose any limits upon the number of bytes that will be
-    /// read from the package - if message length is known, use [`Package::with_len`].
+    /// This function is useful if the encoded payload contains the message length as a
+    /// 64-bit integer in big-endian byte order.
     ///
     /// # Examples
     ///
@@ -85,15 +105,49 @@ where
     /// use asbs::binary;
     /// use std::fs::File;
     ///
-    /// let pattern = |i| Some(if i % 64 > 32 { 0b_1001_0010 } else { 0b_0000_0011 });
-    /// let package = File::open("package")?;
+    /// let mut package = binary::Package::with_embedded_len(
+    ///     |i| Some(1u8 << (i % 4)),
+    ///     File::open("package")?,
+    /// );
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    #[must_use]
+    pub fn with_embedded_len(pattern: P, reader: R) -> Self {
+        Self {
+            pattern,
+            reader: BufReader::new(reader),
+            len: PayloadLength::Embedded,
+        }
+    }
+
+    /// Creates a new [`Package<P, R>`] with the supplied pattern and reader.
     ///
-    /// let mut package = binary::Package::new(pattern, package);
+    /// This does not impose any limits upon the number of bytes that will be
+    /// read from the package.
+    ///
+    /// If message length is known beforehand, use [`Package::with_len`].
+    ///
+    /// If message length is embedded, use [`Package::with_embedded_len`].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use asbs::binary;
+    /// use std::fs::File;
+    ///
+    /// let mut package = binary::Package::new(
+    ///     |_| Some(0b1101),
+    ///     File::open("package")?,
+    /// );
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[must_use]
     pub fn new(pattern: P, reader: R) -> Self {
-        Self::with_len(usize::MAX, pattern, reader)
+        Self {
+            pattern,
+            reader: BufReader::new(reader),
+            len: PayloadLength::Unbound,
+        }
     }
 }
 
@@ -107,21 +161,41 @@ where
     fn reveal<W: Write>(self, output: W) -> io::Result<usize> {
         let mut output = BufWriter::new(output);
 
-        let mut payload_byte = 0u8;
-        let mut bit_count = 0usize;
+        let mut len_bytes = (self.len == PayloadLength::Embedded).then(|| Vec::with_capacity(8));
 
         let mut bytes_written = 0usize;
-
         let mut write_byte = |byte| -> Result<ControlFlow<()>, io::Error> {
+            if let Some(bytes) = len_bytes.as_mut() {
+                bytes.push(byte);
+
+                if bytes.len() == 8 {
+                    self.len = PayloadLength::Bound(u64::from_be_bytes(
+                        *bytes.first_chunk::<8>().unwrap(),
+                    ));
+
+                    len_bytes = None;
+                }
+
+                return Ok(ControlFlow::Continue(()));
+            }
+
             bytes_written += output.write(&[byte])?;
 
-            Ok(if bytes_written < self.len {
-                ControlFlow::Continue(())
-            } else {
-                ControlFlow::Break(())
+            Ok(match self.len {
+                PayloadLength::Embedded => unreachable!("`PayloadLength::Embedded` is replaced with `PayloadLength::Known(n)` before reaching this"),
+                PayloadLength::Unbound => ControlFlow::Continue(()),
+                PayloadLength::Bound(len) => {
+                    if (bytes_written as u64) < len {
+                        ControlFlow::Continue(())
+                    } else {
+                        ControlFlow::Break(())
+                    }
+                }
             })
         };
 
+        let mut payload_byte = 0;
+        let mut bit_count = 0usize;
         for (index, package_byte) in self.reader.by_ref().bytes().enumerate() {
             let Some(mask) = (self.pattern)(index) else {
                 break;
