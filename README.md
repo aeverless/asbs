@@ -30,14 +30,14 @@ let pattern = |i| Some(1u8 << (i % 3));
 // Define the payload
 let payload = b"a very secret message";
 
-// Create a carrier with a given pattern that will write to a file
+// Create a carrier with the given payload length, pattern, and output file
 let mut carrier = binary::Carrier::with_embedded_len(
     payload.len(),
     pattern,
     File::create("package")?,
 );
 
-// Write the payload hidden within the given cover file into `package`
+// Write the payload hidden within the given cover file
 carrier.conceal(
     payload.as_slice(),
     File::open("cover")?,
@@ -53,7 +53,7 @@ use std::fs::File;
 // Define the bit pattern
 let pattern = |i| Some(1u8 << (i % 3));
 
-// Create a package with the given message length, pattern, and package file
+// Create a package with the given pattern and input file
 let mut package = binary::Package::with_embedded_len(
     pattern,
     File::open("package")?,
