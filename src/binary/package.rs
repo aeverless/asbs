@@ -173,6 +173,10 @@ where
                         *bytes.first_chunk::<8>().unwrap(),
                     ));
 
+                    if let PayloadLength::Bound(0) = self.len {
+                        return Ok(ControlFlow::Break(()));
+                    }
+
                     len_bytes = None;
                 }
 
@@ -211,6 +215,7 @@ where
                 }
 
                 if write_byte(payload_byte)?.is_break() {
+                    output.flush()?;
                     return Ok(bytes_written);
                 }
 
@@ -222,6 +227,8 @@ where
         if bit_count > 0 {
             write_byte(payload_byte)?;
         }
+
+        output.flush()?;
 
         Ok(bytes_written)
     }

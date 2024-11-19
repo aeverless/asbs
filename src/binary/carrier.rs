@@ -6,15 +6,13 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 /// It writes to the carrier writer in the [`conceal`][crate::Conceal::conceal] method until
 /// either occurs:
 ///
-/// 1. The writer no longer accepts any writes, which may be possible if the writer
-///    is unable to contain the concealed message in its entirety, or
+/// 1. The specified length of the payload is reached, or
 /// 2. The payload is empty, in which case the remainder of the cover is copied into
 ///    the writer, or
-/// 3. The cover is empty, in which case the message remains partially written; it may
-///    be possible if the cover is unable to contain the message in its concealed form.
-///    In this case it is recommended to either use a bigger cover or pick a different
-///    bit pattern, or
-/// 4. The specified length of the payload is reached.
+/// 3. The cover is empty or the writer no longer accepts any writes, in which case the
+///    message may remain partially written; it may be possible if the message is too
+///    large or the bit pattern is too sparse. In this case an error of kind
+///    [`std::io::ErrorKind::WriteZero`] is returned.
 ///
 /// # Examples
 ///
@@ -143,7 +141,7 @@ where
 
         let mut payload_bytes = len_bytes.chain(BufReader::new(payload)).bytes();
         let mut payload_byte = match payload_bytes.next() {
-            Some(byte) if self.len.is_none_or(|len| len > 0) => byte?,
+            Some(byte) => byte?,
             _ => return Ok(io::copy(&mut cover, &mut self.writer)? as usize),
         };
 
@@ -169,16 +167,16 @@ where
 
                 payload_bytes_written += 1;
 
-                payload_byte = match payload_bytes.next() {
-                    Some(byte) => byte?,
-                    None => break,
-                };
-
                 if self.len.is_some_and(|len| {
                     payload_bytes_written > 8 && payload_bytes_written - 8 >= len
                 }) {
                     break;
                 }
+
+                payload_byte = match payload_bytes.next() {
+                    Some(byte) => byte?,
+                    None => break,
+                };
 
                 bit_count = 0;
             }
@@ -188,6 +186,10 @@ where
             if bit_count == 8 {
                 break;
             }
+        }
+
+        if bit_count > 0 && payload_bytes.next().is_some() {
+            return Err(io::Error::from(io::ErrorKind::WriteZero));
         }
 
         bytes_written += io::copy(&mut cover, &mut self.writer)? as usize;
