@@ -75,26 +75,24 @@ fn it_handles_zero_length_payload() -> io::Result<()> {
 }
 
 #[test]
-fn it_handles_zero_length_cover() -> io::Result<()> {
+fn it_handles_partial_conceal() -> io::Result<()> {
     let pattern = |_| Some(1);
 
     let mut package = Vec::with_capacity(0);
 
-    binary::Carrier::new(pattern, &mut package)
-        .conceal(b"this message won't be written".as_slice(), [].as_slice())?;
-
-    let mut revealed_payload = Vec::with_capacity(0);
-
-    binary::Package::with_embedded_len(pattern, package.as_slice())
-        .reveal(&mut revealed_payload)?;
-
-    assert!(revealed_payload.is_empty());
+    assert_eq!(
+        io::ErrorKind::WriteZero,
+        binary::Carrier::new(pattern, &mut package)
+        .conceal(b"this message won't be written".as_slice(), [].as_slice())
+            .unwrap_err()
+            .kind()
+    );
 
     Ok(())
 }
 
 #[test]
-fn it_handles_partial_write() -> io::Result<()> {
+fn it_handles_partial_reveal() -> io::Result<()> {
     let pattern = |_| Some(1);
 
     let mut package = Vec::new();

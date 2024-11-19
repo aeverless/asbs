@@ -148,7 +148,7 @@ where
         let mut payload_bytes_written = 0u64;
 
         let mut bytes_written = 0;
-        let mut bit_count = 0usize;
+        let mut bit_count = 0u8;
 
         for (index, cover_byte) in cover.by_ref().bytes().enumerate() {
             let Some(mask) = (self.pattern)(index) else {
@@ -167,9 +167,10 @@ where
 
                 payload_bytes_written += 1;
 
-                if self.len.is_some_and(|len| {
-                    payload_bytes_written > 8 && payload_bytes_written - 8 >= len
-                }) {
+                if self
+                    .len
+                    .is_some_and(|n| payload_bytes_written >= 8 && payload_bytes_written - 8 >= n)
+                {
                     break;
                 }
 
@@ -188,7 +189,10 @@ where
             }
         }
 
-        if bit_count > 0 && payload_bytes.next().is_some() {
+        if match self.len {
+            Some(n) => payload_bytes_written < 8 || payload_bytes_written - 8 < n,
+            None => payload_bytes.next().is_some(),
+        } {
             return Err(io::Error::from(io::ErrorKind::WriteZero));
         }
 
